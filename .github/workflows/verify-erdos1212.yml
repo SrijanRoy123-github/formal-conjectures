@@ -1,0 +1,66 @@
+name: Verify Erdos 1212 pinned Lean proof
+
+on:
+  push:
+    branches:
+      - verify-erdos1212-external
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout pinned external proof
+        uses: actions/checkout@v4
+        with:
+          repository: crabsatellite/erdos-1212-visible-lattice-path
+          ref: 400001f0847afe36a26c588d34445210dbdc116e
+
+      - name: Confirm pinned commit
+        run: |
+          echo "Pinned commit:"
+          git rev-parse HEAD
+          test "$(git rev-parse HEAD)" = "400001f0847afe36a26c588d34445210dbdc116e"
+
+      - name: Install elan
+        run: |
+          curl https://elan.lean-lang.org/elan-init.sh -sSf | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Install pinned Lean toolchain
+        run: |
+          TOOLCHAIN=$(tr -d '\r\n' < kernel/lean-toolchain)
+          echo "Installing $TOOLCHAIN"
+          elan toolchain install "$TOOLCHAIN"
+
+      - name: Get Mathlib cache
+        working-directory: kernel
+        run: lake exe cache get
+
+      - name: Build pinned formalization
+        working-directory: kernel
+        run: |
+          set -o pipefail
+          lake build Erdos1212Kernel 2>&1 | tee build.log
+
+      - name: Run trust-zero audit
+        working-directory: kernel
+        run: |
+          set -o pipefail
+          lake env lean --trust=0 Erdos1212Kernel/AlgebraicCorridorKernelAudit.lean 2>&1 | tee audit.log
+
+      - name: Show audit evidence
+        working-directory: kernel
+        run: |
+          echo "===== TRUST-ZERO AUDIT ====="
+          cat audit.log
+
+      - name: Upload verification logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: erdos1212-independent-verification
+          path: |
+            kernel/build.log
+            kernel/audit.log
